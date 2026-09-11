@@ -17,24 +17,33 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y git bc bison flex build-essential device-tree-compiler libssl-dev libelf-dev python3 wget xz-utils
 
-      - name: Fetch legacy Android ARM toolchain
+      - name: Fetch legacy Android ARM GCC 4.9
         run: |
           set -eux
           mkdir -p "$HOME/toolchains"
-          TOOLCHAIN_ROOT="$HOME/toolchains/armhf-standalone-4.9"
-          TOOLCHAIN_ARCHIVE="$RUNNER_TEMP/google_armhf-standalone-4.9.tar.xz"
-          wget -q --show-progress https://kali.download/nethunter-images/toolchains/google_armhf-standalone-4.9.tar.xz -O "$TOOLCHAIN_ARCHIVE"
-          tar -xJf "$TOOLCHAIN_ARCHIVE" -C "$HOME/toolchains"
+          TOOLCHAIN_ROOT="$HOME/toolchains/arm-linux-androideabi-4.9"
+          TOOLCHAIN_ARCHIVE="$RUNNER_TEMP/arm-linux-androideabi-4.9.tar.gz"
+          TOOLCHAIN_URL="https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/heads/android10-release.tar.gz"
+
+          wget -q --show-progress "$TOOLCHAIN_URL" -O "$TOOLCHAIN_ARCHIVE"
+          mkdir -p "$TOOLCHAIN_ROOT"
+          tar -xzf "$TOOLCHAIN_ARCHIVE" -C "$TOOLCHAIN_ROOT"
 
           echo '=== TOOLCHAIN BINARIES ==='
-          find "$TOOLCHAIN_ROOT/bin" -maxdepth 1 -type f -o -type l | sort | head -80
+          find "$TOOLCHAIN_ROOT/bin" -maxdepth 1 \( -type f -o -type l \) -print | sort | head -100
 
-          test -x "$TOOLCHAIN_ROOT/bin/arm-linux-androideabi-gcc"
+          GCC="$TOOLCHAIN_ROOT/bin/arm-linux-androideabi-gcc"
+          GXX="$TOOLCHAIN_ROOT/bin/arm-linux-androideabi-g++"
+          test -x "$GCC"
+          test -x "$GXX"
+
           TOOLCHAIN_BIN="$TOOLCHAIN_ROOT/bin"
           echo "$TOOLCHAIN_BIN" >> "$GITHUB_PATH"
           echo "CROSS_COMPILE=$TOOLCHAIN_BIN/arm-linux-androideabi-" >> "$GITHUB_ENV"
-          echo "Using GCC: $TOOLCHAIN_BIN/arm-linux-androideabi-gcc"
-          "$TOOLCHAIN_BIN/arm-linux-androideabi-gcc" --version | head -1
+          echo "Using GCC: $GCC"
+          "$GCC" --version | head -1
+          echo "Using G++: $GXX"
+          "$GXX" --version | head -1
 
       - name: Fetch public APQ8084 source
         run: |
