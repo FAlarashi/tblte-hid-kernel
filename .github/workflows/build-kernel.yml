@@ -19,12 +19,27 @@ jobs:
 
       - name: Fetch legacy Android ARM toolchain
         run: |
+          set -eux
           mkdir -p "$HOME/toolchains"
-          wget -q --show-progress https://kali.download/nethunter-images/toolchains/google_armhf-4.9.tar.xz -O "$HOME/toolchains/google_armhf-4.9.tar.xz"
-          tar -xJf "$HOME/toolchains/google_armhf-4.9.tar.xz" -C "$HOME/toolchains"
-          GCC="$(find "$HOME/toolchains" -name 'arm-linux-androideabi-gcc' -print -quit)"
+          TOOLCHAIN_ARCHIVE="$RUNNER_TEMP/google_armhf-4.9.tar.xz"
+          wget -q --show-progress https://kali.download/nethunter-images/toolchains/google_armhf-4.9.tar.xz -O "$TOOLCHAIN_ARCHIVE"
+
+          echo '=== TOOLCHAIN ARCHIVE ==='
+          tar -tJf "$TOOLCHAIN_ARCHIVE" | head -100
+
+          tar -xJf "$TOOLCHAIN_ARCHIVE" -C "$HOME/toolchains"
+
+          echo '=== EXTRACTED GCC CANDIDATES ==='
+          find "$HOME/toolchains" \( -type f -o -type l \) \
+            \( -name 'arm-linux-androideabi-gcc' -o -name 'arm-linux-androideabi-gcc-*' \) \
+            -print
+
+          GCC="$(find "$HOME/toolchains" \( -type f -o -type l \) \
+            \( -name 'arm-linux-androideabi-gcc' -o -name 'arm-linux-androideabi-gcc-*' \) \
+            -print -quit)"
           test -n "$GCC"
-          test -x "$GCC"
+          test -e "$GCC"
+          chmod +x "$GCC" 2>/dev/null || true
           TOOLCHAIN_BIN="$(dirname "$GCC")"
           echo "$TOOLCHAIN_BIN" >> "$GITHUB_PATH"
           echo "CROSS_COMPILE=$TOOLCHAIN_BIN/arm-linux-androideabi-" >> "$GITHUB_ENV"
@@ -57,6 +72,7 @@ jobs:
         env:
           ARCH: arm
         run: |
+          echo "CROSS_COMPILE=$CROSS_COMPILE"
           make -j2 V=1 zImage dtbs
 
       - name: Verify outputs
