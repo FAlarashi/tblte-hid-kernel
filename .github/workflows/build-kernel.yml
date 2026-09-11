@@ -35,7 +35,10 @@ jobs:
       - name: Prepare tblte configuration
         working-directory: kernel
         run: |
-          make ARCH=arm apq8084_sec_tblte_eur_defconfig
+          # Samsung's APQ8084 tree requires the device variant to be supplied
+          # to the common Samsung defconfig. This reproduces the Android build
+          # flow instead of invoking the variant defconfig directly.
+          make ARCH=arm VARIANT_DEFCONFIG=apq8084_sec_tblte_eur_defconfig apq8084_sec_defconfig
           grep -E 'CONFIG_(USB_GADGET|USB_G_ANDROID|HID|USB_HID|UHID|CONFIGFS_FS)=' .config | tee ../hid-config.txt
 
       - name: Build kernel
@@ -44,12 +47,14 @@ jobs:
           ARCH: arm
           CROSS_COMPILE: arm-linux-gnueabi-
         run: |
-          make -j2 V=1 zImage dtbs
+          # This 3.10 tree ships a Python-2-only gcc warning wrapper.
+          # Bypass the wrapper for CI and invoke the cross compiler directly.
+          make -j2 V=1 CC=arm-linux-gnueabi-gcc zImage dtbs
 
       - name: Verify outputs
         run: |
           test -s kernel/arch/arm/boot/zImage
-          find kernel/arch/arm/boot/dts -type f -name '*tblte*.dtb' -o -name '*8084*.dtb' | head -20 | tee dtb-list.txt
+          find kernel/arch/arm/boot/dts -type f \( -name '*tblte*.dtb' -o -name '*8084*.dtb' \) | head -20 | tee dtb-list.txt
           file kernel/arch/arm/boot/zImage
 
       - name: Package build artifacts
