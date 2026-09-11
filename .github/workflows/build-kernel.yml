@@ -49,6 +49,24 @@ jobs:
         run: |
           git clone --depth 1 --branch lineage-18.1 https://github.com/apq8084/android_kernel_samsung_apq8084.git kernel
 
+      - name: Port legacy gcc-wrapper to Python 3
+        working-directory: kernel
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/gcc-wrapper.py')
+          s = p.read_text()
+          s = s.replace('#! /usr/bin/env python', '#! /usr/bin/env python3')
+          s = s.replace('        print "error, forbidden warning:", m.group(2)', '        print("error, forbidden warning:", m.group(2))')
+          s = s.replace("        for line in proc.stderr:\n            print line,\n            interpret_warning(line)", "        for line in proc.stderr:\n            if isinstance(line, bytes):\n                line = line.decode('utf-8', errors='replace')\n            print(line, end='')\n            interpret_warning(line)")
+          s = s.replace("            print args[0] + ':',e.strerror", "            print(args[0] + ':', e.strerror)")
+          s = s.replace("            print 'Is your PATH set correctly?'", "            print('Is your PATH set correctly?')")
+          s = s.replace("            print ' '.join(args), str(e)", "            print(' '.join(args), str(e))")
+          p.write_text(s)
+          PY
+          python3 -m py_compile scripts/gcc-wrapper.py
+          sed -n '50,110p' scripts/gcc-wrapper.py
+
       - name: Record source provenance
         run: |
           cd kernel
