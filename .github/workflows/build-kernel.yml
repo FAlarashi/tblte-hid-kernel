@@ -1,0 +1,67 @@
+name: Build tblte HID kernel
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git bc bison flex build-essential gcc-arm-linux-gnueabi device-tree-compiler libssl-dev libelf-dev python3
+
+      - name: Fetch public APQ8084 source
+        run: |
+          git clone --depth 1 --branch lineage-18.1 https://github.com/apq8084/android_kernel_samsung_apq8084.git kernel
+
+      - name: Record source provenance
+        run: |
+          cd kernel
+          git rev-parse HEAD | tee ../source-commit.txt
+          make ARCH=arm kernelversion | tee ../kernel-version.txt
+          grep -E '^(VERSION|PATCHLEVEL|SUBLEVEL) =' Makefile
+
+      - name: Apply HID integration
+        run: |
+          python3 scripts/apply_hid.py kernel
+
+      - name: Prepare tblte configuration
+        working-directory: kernel
+        run: |
+          make ARCH=arm apq8084_sec_tblte_eur_defconfig
+          grep -E 'CONFIG_(USB_GADGET|USB_G_ANDROID|HID|USB_HID|UHID|CONFIGFS_FS)=' .config | tee ../hid-config.txt
+
+      - name: Build kernel
+        working-directory: kernel
+        env:
+          ARCH: arm
+          CROSS_COMPILE: arm-linux-gnueabi-
+        run: |
+          make -j2 V=1 zImage dtbs
+
+      - name: Verify outputs
+        run: |
+          test -s kernel/arch/arm/boot/zImage
+          find kernel/arch/arm/boot/dts -type f -name '*tblte*.dtb' -o -name '*8084*.dtb' | head -20 | tee dtb-list.txt
+          file kernel/arch/arm/boot/zImage
+
+      - name: Package build artifacts
+        run: |
+          mkdir -p artifacts
+          cp kernel/arch/arm/boot/zImage artifacts/
+          cp source-commit.txt kernel-version.txt hid-config.txt artifacts/
+          find kernel/arch/arm/boot/dts -type f \( -name '*tblte*.dtb' -o -name '*8084*.dtb' \) -exec cp {} artifacts/ \;
+          tar -czf artifacts/tblte-hid-kernel-source-state.tar.gz patches scripts docs README.md
+
+      - name: Upload kernel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tblte-hid-kernel-build
+          path: artifacts/
