@@ -88,6 +88,8 @@ jobs:
       - name: Apply HID integration
         run: |
           python3 scripts/apply_hid.py kernel
+          python3 scripts/fix_hid_multi_instance.py kernel
+          python3 -m py_compile scripts/apply_hid.py scripts/fix_hid_multi_instance.py
 
       - name: Prepare tblte configuration
         working-directory: kernel
