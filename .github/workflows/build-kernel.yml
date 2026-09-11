@@ -15,16 +15,17 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git bc bison flex build-essential device-tree-compiler libssl-dev libelf-dev python3
+          sudo apt-get install -y git bc bison flex build-essential device-tree-compiler libssl-dev libelf-dev python3 wget xz-utils
 
       - name: Fetch legacy Android ARM toolchain
         run: |
           mkdir -p "$HOME/toolchains"
-          git clone --depth 1 --branch android-11.0.0_r1 \
-            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi \
-            "$HOME/toolchains/arm-linux-androideabi-4.9"
-          echo "$HOME/toolchains/arm-linux-androideabi-4.9/bin" >> "$GITHUB_PATH"
-          "$HOME/toolchains/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-gcc" --version | head -1
+          wget -q --show-progress https://kali.download/nethunter-images/toolchains/google_armhf-4.9.tar.xz -O "$HOME/toolchains/google_armhf-4.9.tar.xz"
+          tar -xJf "$HOME/toolchains/google_armhf-4.9.tar.xz" -C "$HOME/toolchains"
+          TOOLCHAIN_ROOT="$HOME/toolchains/armhf-4.9"
+          test -x "$TOOLCHAIN_ROOT/bin/arm-linux-androideabi-gcc"
+          echo "$TOOLCHAIN_ROOT/bin" >> "$GITHUB_PATH"
+          "$TOOLCHAIN_ROOT/bin/arm-linux-androideabi-gcc" --version | head -1
 
       - name: Fetch public APQ8084 source
         run: |
@@ -44,9 +45,6 @@ jobs:
       - name: Prepare tblte configuration
         working-directory: kernel
         run: |
-          # Samsung's APQ8084 tree requires the device variant to be supplied
-          # to the common Samsung defconfig. This reproduces the Android build
-          # flow instead of invoking the variant defconfig directly.
           make ARCH=arm VARIANT_DEFCONFIG=apq8084_sec_tblte_eur_defconfig apq8084_sec_defconfig
           grep -E 'CONFIG_(USB_GADGET|USB_G_ANDROID|HID|USB_HID|UHID|CONFIGFS_FS)=' .config | tee ../hid-config.txt
 
@@ -54,10 +52,8 @@ jobs:
         working-directory: kernel
         env:
           ARCH: arm
-          CROSS_COMPILE: ${{ env.HOME }}/toolchains/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
+          CROSS_COMPILE: ${{ env.HOME }}/toolchains/armhf-4.9/bin/arm-linux-androideabi-
         run: |
-          # Build the Samsung 3.10 tree with the legacy Android ARM GCC it
-          # was designed for. Do not use Ubuntu's modern GCC 11 cross compiler.
           make -j2 V=1 zImage dtbs
 
       - name: Verify outputs
