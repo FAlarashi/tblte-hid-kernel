@@ -100,8 +100,26 @@ jobs:
         env:
           ARCH: arm
         run: |
+          set +e
           echo "CROSS_COMPILE=$CROSS_COMPILE"
-          make -j2 V=1 zImage dtbs
+          make -j1 V=1 zImage dtbs 2>&1 | tee ../kernel-build.log
+          rc=${PIPESTATUS[0]}
+          echo "=== BUILD EXIT CODE: $rc ==="
+          echo "=== LAST 250 BUILD LOG LINES ==="
+          tail -n 250 ../kernel-build.log
+          exit "$rc"
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tblte-build-diagnostics
+          path: |
+            kernel-build.log
+            source-commit.txt
+            kernel-version.txt
+            hid-config.txt
+          if-no-files-found: ignore
 
       - name: Verify outputs
         run: |
