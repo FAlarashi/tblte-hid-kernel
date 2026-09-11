@@ -15,7 +15,16 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git bc bison flex build-essential gcc-arm-linux-gnueabi device-tree-compiler libssl-dev libelf-dev python3
+          sudo apt-get install -y git bc bison flex build-essential device-tree-compiler libssl-dev libelf-dev python3
+
+      - name: Fetch legacy Android ARM toolchain
+        run: |
+          mkdir -p "$HOME/toolchains"
+          git clone --depth 1 --branch android-11.0.0_r1 \
+            https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi \
+            "$HOME/toolchains/arm-linux-androideabi-4.9"
+          echo "$HOME/toolchains/arm-linux-androideabi-4.9/bin" >> "$GITHUB_PATH"
+          "$HOME/toolchains/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-gcc" --version | head -1
 
       - name: Fetch public APQ8084 source
         run: |
@@ -45,11 +54,11 @@ jobs:
         working-directory: kernel
         env:
           ARCH: arm
-          CROSS_COMPILE: arm-linux-gnueabi-
+          CROSS_COMPILE: ${{ env.HOME }}/toolchains/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
         run: |
-          # This 3.10 tree ships a Python-2-only gcc warning wrapper.
-          # Bypass the wrapper for CI and invoke the cross compiler directly.
-          make -j2 V=1 CC=arm-linux-gnueabi-gcc zImage dtbs
+          # Build the Samsung 3.10 tree with the legacy Android ARM GCC it
+          # was designed for. Do not use Ubuntu's modern GCC 11 cross compiler.
+          make -j2 V=1 zImage dtbs
 
       - name: Verify outputs
         run: |
