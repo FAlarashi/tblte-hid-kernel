@@ -57,15 +57,26 @@ jobs:
           p = Path('scripts/gcc-wrapper.py')
           s = p.read_text()
           s = s.replace('#! /usr/bin/env python', '#! /usr/bin/env python3')
-          s = s.replace('        print "error, forbidden warning:", m.group(2)', '        print("error, forbidden warning:", m.group(2))')
-          s = s.replace("        for line in proc.stderr:\n            print line,\n            interpret_warning(line)", "        for line in proc.stderr:\n            if isinstance(line, bytes):\n                line = line.decode('utf-8', errors='replace')\n            print(line, end='')\n            interpret_warning(line)")
-          s = s.replace("            print args[0] + ':',e.strerror", "            print(args[0] + ':', e.strerror)")
-          s = s.replace("            print 'Is your PATH set correctly?'", "            print('Is your PATH set correctly?')")
-          s = s.replace("            print ' '.join(args), str(e)", "            print(' '.join(args), str(e))")
+          s = s.replace('        print "error, forbidden warning:", m.group(2)', '        print("error, forbidden warning:", m.group(2), file=sys.stderr)')
+          s = s.replace("        for line in proc.stderr:\n            print line,\n            interpret_warning(line)", "        for line in proc.stderr:\n            if isinstance(line, bytes):\n                line = line.decode('utf-8', errors='replace')\n            print(line, end='', file=sys.stderr)\n            interpret_warning(line)")
+          s = s.replace("            print args[0] + ':',e.strerror", "            print(args[0] + ':', e.strerror, file=sys.stderr)")
+          s = s.replace("            print 'Is your PATH set correctly?'", "            print('Is your PATH set correctly?', file=sys.stderr)")
+          s = s.replace("            print ' '.join(args), str(e)", "            print(' '.join(args), str(e), file=sys.stderr)")
           p.write_text(s)
           PY
           python3 -m py_compile scripts/gcc-wrapper.py
           sed -n '50,110p' scripts/gcc-wrapper.py
+
+          echo '=== gcc-wrapper stdout/stderr separation test ==='
+          include_dir="$(python3 scripts/gcc-wrapper.py "$CROSS_COMPILE"gcc -print-file-name=include)"
+          test -d "$include_dir"
+          case "$include_dir" in
+            *"Android GCC has been deprecated"*)
+              echo 'gcc-wrapper leaked compiler stderr into stdout' >&2
+              exit 1
+              ;;
+          esac
+          echo "Compiler include directory: $include_dir"
 
       - name: Record source provenance
         run: |
