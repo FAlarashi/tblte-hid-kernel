@@ -22,10 +22,14 @@ jobs:
           mkdir -p "$HOME/toolchains"
           wget -q --show-progress https://kali.download/nethunter-images/toolchains/google_armhf-4.9.tar.xz -O "$HOME/toolchains/google_armhf-4.9.tar.xz"
           tar -xJf "$HOME/toolchains/google_armhf-4.9.tar.xz" -C "$HOME/toolchains"
-          TOOLCHAIN_ROOT="$HOME/toolchains/armhf-4.9"
-          test -x "$TOOLCHAIN_ROOT/bin/arm-linux-androideabi-gcc"
-          echo "$TOOLCHAIN_ROOT/bin" >> "$GITHUB_PATH"
-          "$TOOLCHAIN_ROOT/bin/arm-linux-androideabi-gcc" --version | head -1
+          GCC="$(find "$HOME/toolchains" -name 'arm-linux-androideabi-gcc' -print -quit)"
+          test -n "$GCC"
+          test -x "$GCC"
+          TOOLCHAIN_BIN="$(dirname "$GCC")"
+          echo "$TOOLCHAIN_BIN" >> "$GITHUB_PATH"
+          echo "CROSS_COMPILE=$TOOLCHAIN_BIN/arm-linux-androideabi-" >> "$GITHUB_ENV"
+          echo "Using GCC: $GCC"
+          "$GCC" --version | head -1
 
       - name: Fetch public APQ8084 source
         run: |
@@ -52,7 +56,6 @@ jobs:
         working-directory: kernel
         env:
           ARCH: arm
-          CROSS_COMPILE: ${{ env.HOME }}/toolchains/armhf-4.9/bin/arm-linux-androideabi-
         run: |
           make -j2 V=1 zImage dtbs
 
