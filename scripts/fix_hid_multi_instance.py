@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """Make the legacy 3.10 f_hid implementation safe for two HID instances.
 
-The Android integration creates keyboard and mouse as separate HID functions.
-The stock driver keeps mutable descriptors globally, so the second bind can
-overwrite the first instance. This transformation gives every f_hidg instance
-private descriptor storage and makes control-request descriptor replies use it.
-It also implements real HID boot-protocol state instead of stalling the
-GET_PROTOCOL/SET_PROTOCOL requests used by hosts during enumeration.
+apply_hid.py already installs the HID GET_PROTOCOL/SET_PROTOCOL handlers.
+This second pass only supplies the per-instance descriptor storage that the
+Android integration needs. The stock driver keeps mutable descriptors
+globally, so the second HID bind can overwrite the first instance.
 """
 from pathlib import Path
 import sys
@@ -20,26 +18,32 @@ s = p.read_text()
 if "struct usb_interface_descriptor interface_desc;" in s:
     raise SystemExit("multi-instance HID fix already applied")
 
+# apply_hid.py is deliberately responsible for protocol handling. Confirm
+# that pass ran before adding the protocol state field it depends on.
+if "hidg->protocol" not in s:
+    raise SystemExit("f_hid.c: expected HID protocol handlers from apply_hid.py are missing")
+
 # Add per-instance descriptor storage and protocol state to struct f_hidg.
 anchor = "\tstruct usb_ep\t\t\t*out_ep;\n"
 insert = anchor + """
 
-	/* Private mutable descriptors: keyboard and mouse must not share them. */
-	struct usb_interface_descriptor interface_desc;
-	struct hid_descriptor desc;
-	struct usb_endpoint_descriptor hs_in_ep_desc;
-	struct usb_endpoint_descriptor hs_out_ep_desc;
-	struct usb_endpoint_descriptor fs_in_ep_desc;
-	struct usb_endpoint_descriptor fs_out_ep_desc;
-	struct usb_descriptor_header *hs_descriptors[5];
-	struct usb_descriptor_header *fs_descriptors[5];
-	unsigned char protocol;
+\t/* Private mutable descriptors: keyboard and mouse must not share them. */
+\tstruct usb_interface_descriptor interface_desc;
+\tstruct hid_descriptor desc;
+\tstruct usb_endpoint_descriptor hs_in_ep_desc;
+\tstruct usb_endpoint_descriptor hs_out_ep_desc;
+\tstruct usb_endpoint_descriptor fs_in_ep_desc;
+\tstruct usb_endpoint_descriptor fs_out_ep_desc;
+\tstruct usb_descriptor_header *hs_descriptors[5];
+\tstruct usb_descriptor_header *fs_descriptors[5];
+\tunsigned char protocol;
 """
 if anchor not in s:
     raise SystemExit("f_hid.c: f_hidg endpoint anchor not found")
 s = s.replace(anchor, insert, 1)
 
-# Make HID control-request descriptor responses instance-local.
+# Make HID descriptor control replies instance-local. apply_hid.py leaves the
+# descriptor request itself otherwise unchanged.
 old = "hidg_desc.bLength"
 if old not in s:
     raise SystemExit("f_hid.c: HID descriptor length reference not found")
@@ -49,49 +53,11 @@ if old not in s:
     raise SystemExit("f_hid.c: HID descriptor copy reference not found")
 s = s.replace(old, "memcpy(req->buf, &hidg->desc, length);", 1)
 
-# Implement HID boot protocol requests. The state is per HID instance.
-old = '''\tcase ((USB_DIR_IN | USB_TYPE_CLASS | USB_RECIP_INTERFACE) << 8
-\t\t  | HID_REQ_GET_PROTOCOL):
-\t\tVDBG(cdev, "get_protocol\\n");
-\t\tgoto stall;
-\t\tbreak;'''
-new = '''\tcase ((USB_DIR_IN | USB_TYPE_CLASS | USB_RECIP_INTERFACE) << 8
-\t\t  | HID_REQ_GET_PROTOCOL):
-\t\tVDBG(cdev, "get_protocol\\n");
-\t\tif (hidg->bInterfaceSubClass != USB_INTERFACE_SUBCLASS_BOOT)
-\t\t\tgoto stall;
-\t\tlength = min_t(unsigned, length, 1);
-\t\t((u8 *)req->buf)[0] = hidg->protocol;
-\t\tgoto respond;
-\t\tbreak;'''
-if old not in s:
-    raise SystemExit("f_hid.c: GET_PROTOCOL block not found")
-s = s.replace(old, new, 1)
-
-old = '''\tcase ((USB_DIR_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE) << 8
-\t\t  | HID_REQ_SET_PROTOCOL):
-\t\tVDBG(cdev, "set_protocol\\n");
-\t\tgoto stall;
-\t\tbreak;'''
-new = '''\tcase ((USB_DIR_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE) << 8
-\t\t  | HID_REQ_SET_PROTOCOL):
-\t\tVDBG(cdev, "set_protocol\\n");
-\t\tif (hidg->bInterfaceSubClass != USB_INTERFACE_SUBCLASS_BOOT)
-\t\t\tgoto stall;
-\t\tif (value > 1)
-\t\t\tgoto stall;
-\t\thidg->protocol = value;
-\t\tlength = 0;
-\t\tgoto respond;
-\t\tbreak;'''
-if old not in s:
-    raise SystemExit("f_hid.c: SET_PROTOCOL block not found")
-s = s.replace(old, new, 1)
-
 bind = s.index("static int hidg_bind(struct usb_configuration *c, struct usb_function *f)")
 end = s.index("static void hidg_unbind", bind)
 b = s[bind:end]
 
+# Initialize private descriptors before any per-instance mutation.
 anchor = "\t/* allocate instance-specific interface IDs, and patch descriptors */\n"
 init = """\t/* Copy the descriptor templates into this instance before patching. */
 \thidg->interface_desc = hidg_interface_desc;
@@ -127,8 +93,8 @@ if anchor not in b:
 b = b.replace(anchor, init, 1)
 
 # Replace descriptor identifiers only inside hidg_bind. Bare identifier
-# replacement is intentional: autoconfig also needs the private endpoint
-# descriptor, not just its mutable fields.
+# replacement is required because endpoint autoconfiguration needs the private
+# endpoint descriptor object, not merely its fields.
 repls = {
     "hidg_interface_desc": "hidg->interface_desc",
     "hidg_desc": "hidg->desc",
@@ -142,7 +108,7 @@ repls = {
 for old, new in repls.items():
     b = b.replace(old, new)
 
-# No global mutable HID descriptor may remain in the bind function.
+# Ensure no global mutable descriptor symbol remains in bind().
 for name in repls:
     if name in b:
         raise SystemExit(f"hidg_bind: global descriptor reference remains: {name}")
