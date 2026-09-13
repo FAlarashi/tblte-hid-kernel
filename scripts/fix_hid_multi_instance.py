@@ -23,6 +23,38 @@ if "struct usb_interface_descriptor interface_desc;" in s:
 if "hidg->protocol" not in s:
     raise SystemExit("f_hid.c: expected HID protocol handlers from apply_hid.py are missing")
 
+# The original f_hid.c was text-included by hid.c. That compilation context
+# supplied this helper indirectly. Android now builds f_hid.o standalone, so
+# provide the exact request-buffer cleanup helper locally.
+if "static void free_ep_req(struct usb_ep *ep, struct usb_request *req)" not in s:
+    anchor = "static int major, minors;\nstatic struct class *hidg_class;\n"
+    helper = anchor + """
+
+static void free_ep_req(struct usb_ep *ep, struct usb_request *req)
+{
+	if (req->buf)
+		kfree(req->buf);
+	usb_ep_free_request(ep, req);
+}
+"""
+    if anchor not in s:
+        raise SystemExit("f_hid.c: cleanup helper insertion anchor not found")
+    s = s.replace(anchor, helper, 1)
+
+# These are legacy template arrays. Multi-instance HID now builds descriptor
+# arrays inside each f_hidg instance, so the templates are intentionally kept
+# only as initialization sources and must not trigger -Werror unused warnings.
+s = s.replace(
+    "static struct usb_descriptor_header *hidg_hs_descriptors[] = {",
+    "static struct usb_descriptor_header *hidg_hs_descriptors[] __maybe_unused = {",
+    1,
+)
+s = s.replace(
+    "static struct usb_descriptor_header *hidg_fs_descriptors[] = {",
+    "static struct usb_descriptor_header *hidg_fs_descriptors[] __maybe_unused = {",
+    1,
+)
+
 # Add per-instance descriptor storage and protocol state to struct f_hidg.
 anchor = "\tstruct usb_ep\t\t\t*out_ep;\n"
 insert = anchor + """
