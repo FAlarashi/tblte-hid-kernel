@@ -84,8 +84,6 @@ if old not in a:
     raise SystemExit("android.c: supported_functions tail not found")
 a = a.replace(old, new, 1)
 
-# The Android gadget calls these routines during normal gadget enable/disable,
-# so they cannot be restricted to the module-init section.
 for old, new in (
     ('static int __init hidg_bind(struct usb_configuration *c, struct usb_function *f)',
      'static int hidg_bind(struct usb_configuration *c, struct usb_function *f)'),
@@ -98,17 +96,15 @@ for old, new in (
         raise SystemExit(f"f_hid.c: expected signature not found: {old}")
     f = f.replace(old, new, 1)
 
-# f_hid.c is now compiled as its own object by g_android. The original source
-# was normally text-included by hid.c, which supplied the composite definitions
-# indirectly. Include composite.h explicitly so struct usb_function and the
-# descriptor types are complete when f_hid.o is compiled standalone.
+# f_hid.c is compiled as a standalone object by g_android. The original
+# source was text-included by hid.c, which supplied composite definitions
+# indirectly. Make the standalone compilation self-contained.
 old = '#include <linux/usb/g_hid.h>\n'
 new = '#include <linux/usb/g_hid.h>\n#include <linux/usb/composite.h>\n'
 if old not in f:
     raise SystemExit("f_hid.c: g_hid include anchor not found")
 f = f.replace(old, new, 1)
 
-# Implement HID boot-protocol requests expected by hosts.
 old = '''\tcase ((USB_DIR_IN | USB_TYPE_CLASS | USB_RECIP_INTERFACE) << 8
 \t\t  | HID_REQ_GET_PROTOCOL):
 \t\tVDBG(cdev, "get_protocol\\n");
@@ -173,9 +169,9 @@ void ghid_cleanup(void);
 static struct hidg_func_descriptor ghid_device_android_keyboard = {
 \t.subclass = 1,
 \t.protocol = 1,
-\treport_length = 8,
-\treport_desc_length = 63,
-\treport_desc = {
+\t.report_length = 8,
+\t.report_desc_length = 63,
+\t.report_desc = {
 \t\t0x05, 0x01, 0x09, 0x06, 0xa1, 0x01,
 \t\t0x05, 0x07, 0x19, 0xe0, 0x29, 0xe7,
 \t\t0x15, 0x00, 0x25, 0x01, 0x75, 0x01,
@@ -189,10 +185,8 @@ static struct hidg_func_descriptor ghid_device_android_keyboard = {
 \t\t0x81, 0x00, 0xc0
 \t}
 };
-'''.replace('\\treport_length', '\\t.report_length').replace('\\treport_desc_length', '\\t.report_desc_length').replace('\\treport_desc', '\\t.report_desc'))
+''')
 
-# The HID boot mouse protocol is exactly three bytes: buttons, X, Y.
-# Keeping report_length at 3 makes SET_PROTOCOL(BOOT) semantically correct.
 (gadget / "f_hid_android_mouse.c").write_text('''#include <linux/usb/g_hid.h>
 
 static struct hidg_func_descriptor ghid_device_android_mouse = {
