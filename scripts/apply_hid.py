@@ -105,6 +105,54 @@ if old not in f:
     raise SystemExit("f_hid.c: g_hid include anchor not found")
 f = f.replace(old, new, 1)
 
+# This old f_hid.c used free_ep_req() from a newer shared gadget helper that
+# does not exist in this 3.10.108 tree. Keep the old allocation ownership
+# semantics local to HID instead of importing an incompatible helper API.
+helper_anchor = 'static int major, minors;\nstatic struct class *hidg_class;\n'
+helper = helper_anchor + '''
+
+static void hidg_free_ep_req(struct usb_ep *ep, struct usb_request *req)
+{
+\tif (!req)
+\t\treturn;
+\tkfree(req->buf);
+\treq->buf = NULL;
+\tusb_ep_free_request(ep, req);
+}
+'''
+if helper_anchor not in f:
+    raise SystemExit("f_hid.c: helper insertion anchor not found")
+f = f.replace(helper_anchor, helper, 1)
+if "free_ep_req(" not in f:
+    raise SystemExit("f_hid.c: expected legacy free_ep_req calls not found")
+f = f.replace("free_ep_req(", "hidg_free_ep_req(")
+
+# The multi-instance pass gives each HID instance its own descriptor arrays.
+# The original global arrays would therefore be dead objects and -Werror
+# turns them into a hard build failure on this kernel.
+for block in (
+'''static struct usb_descriptor_header *hidg_hs_descriptors[] = {
+\t(struct usb_descriptor_header *)&hidg_interface_desc,
+\t(struct usb_descriptor_header *)&hidg_desc,
+\t(struct usb_descriptor_header *)&hidg_hs_in_ep_desc,
+\t(struct usb_descriptor_header *)&hidg_hs_out_ep_desc,
+\tNULL,
+};
+
+''',
+'''static struct usb_descriptor_header *hidg_fs_descriptors[] = {
+\t(struct usb_descriptor_header *)&hidg_interface_desc,
+\t(struct usb_descriptor_header *)&hidg_desc,
+\t(struct usb_descriptor_header *)&hidg_fs_in_ep_desc,
+\t(struct usb_descriptor_header *)&hidg_fs_out_ep_desc,
+\tNULL,
+};
+
+'''):
+    if block not in f:
+        raise SystemExit("f_hid.c: global descriptor array block not found")
+    f = f.replace(block, "", 1)
+
 old = '''\tcase ((USB_DIR_IN | USB_TYPE_CLASS | USB_RECIP_INTERFACE) << 8
 \t\t  | HID_REQ_GET_PROTOCOL):
 \t\tVDBG(cdev, "get_protocol\\n");
